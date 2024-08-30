@@ -12,20 +12,21 @@ from sentence_transformers import SentenceTransformer
 import torch
 import numpy as np
 import os
+from tqdm import tqdm
 
 path = '/Users/rishabhsingh/Shira_thesis/Crawlers/dia_trans_net/data/conceptNet_embs',
 save_path = '/Users/rishabhsingh/PycharmProjects/Mails_Graph/datasets/',
 emb_file_name = 'conceptnet_embs_eng'
 def node_creation(graph, trie_hash, dictionary,gb):
 
-    for records in dictionary:
+    for records in tqdm(dictionary, total=len(dictionary), desc="Processing records"):
         new_nodes = []
         for key, value in records.items():
             if value is not None:
                 hash_value = hashing_function(value)
                 x = trie_hash.query(hash_value)        #if the node not present in the Graph
                 if x == []:
-                    graph.add_node(value, node_type=key, unique_id=hash_value)     #add node to the graph
+#                    graph.add_node(value, node_type=key, unique_id=hash_value)     #add node to the graph
                     set_trie_hash(trie_hash, hash_value, value)                              #add node to the Trie
                     new_nodes.append([key,value])                                  #make a list of nodes to make edges with
                 if x != []:
@@ -33,17 +34,19 @@ def node_creation(graph, trie_hash, dictionary,gb):
         edge_creation(graph, dictionary,gb,new_nodes)                            #send the new nodes for edge creation
 
 
-def edge_creation(graph, dictionary,gb,new_nodes):
+def edge_creation(graph,dictionary, gb,new_nodes):
     """First add a directed edge from Email to all its respective related nodes"""
     """for records in dictionary:
         email = records['Text']
 #        unique_id = graph.nodes[email]['unique_id']
         edge_email_to_others(records,email,graph,trie)"""
 
-#    email = new_nodes['Text']
     email = [value for key, value in new_nodes if key == 'Text']
     if isinstance(email, list):
         email = ''.join(email)  # Convert list to string
+
+    email = ('Dies ist eine Beispiel-E-Mail zur Überprüfung der erstellten Diagramme. Die eigentliche E-Mail würde SAP- und geschäftsbezogene Inhalte enthalten')
+
 
     msg_sub = KnowExtract(email,gb.trie, 2)
     for hop in range(4):
@@ -95,7 +98,6 @@ def edge_creation(graph, dictionary,gb,new_nodes):
                graph.add_edge(email, value)"""
 
 def set_trie_hash(trie_hash, hash_value, value):
-    print("build trie hash datastructure")
     trie_hash.insert_dataset(hash_value, value)
 
 
@@ -107,21 +109,43 @@ def hashing_function(value):                    #hashing to asign a unique Id to
 
 
 def visualise_graph(graph):
-    nx.draw(graph, with_labels=False)
+    plt.figure(figsize=(10, 7))  # Optional: Adjust the figure size for better visualization
+    nx.draw(graph, with_labels=True, font_size=8)  # Adjust font_size here
     plt.show()
+    """plt.figure(figsize=(10, 7))  # Optional: Adjust the figure size
+    pos = nx.spring_layout(graph)  # Position nodes using the spring layout
+
+    # Draw nodes (visible but without labels)
+    nx.draw_networkx_nodes(graph, pos, node_size=500, node_color='lightblue')
+
+    # Draw edges without node labels
+    nx.draw_networkx_edges(graph, pos, edge_color='black')
+
+    # Draw edge labels
+    edge_labels = nx.get_edge_attributes(graph, 'belongs_to')  # Assuming edges have a 'label' attribute
+    nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, font_size=8)
+
+    # Draw nodes without labels
+    nx.draw_networkx_labels(graph, pos, labels={n: '' for n in graph.nodes()})  # Empty labels
+
+    plt.show()"""
+
+def save_graph(graph):
+    for node, data in graph.nodes(data=True):
+        for key, value in data.items():
+            if isinstance(value, np.str_):
+                graph.nodes[node][key] = str(value)
+
+    if isinstance(graph, nx.MultiGraph):
+        for u, v, k, data in graph.edges(data=True, keys=True):
+            for key, value in data.items():
+                if isinstance(value, np.str_):
+                    graph.edges[u, v, k][key] = str(value)
+
+    for idx, (u, v, key, data) in enumerate(graph.edges(keys=True, data=True)):
+        data['id'] = idx
+
+    nx.write_graphml(graph, "/Users/rishabhsingh/PycharmProjects/Mails_Graph/datasets/graph.graphml")
 
 
 
-def main():
-    dictionary = json.load(open('/Users/rishabhsingh/Downloads/tumail.json', 'r'))
-    trie_hash = Trie_hash()
-    trie = Trie()
-    gb = GraphBuilder()
-    graph = nx.MultiGraph()
-    node_creation(graph, trie_hash, dictionary,gb)
-    visualise_graph(graph)
-#    edge_creation(graph, dictionary,trie)
-
-
-if __name__ == '__main__':
-    main()

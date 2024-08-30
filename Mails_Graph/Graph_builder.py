@@ -42,6 +42,7 @@ class GraphBuilder:
                 print("no saved embeddings could be found")
                 dataset = load_dataset("conceptnet5")
                 german_dataset = dataset.filter(lambda example: example['lang'] == 'de')
+#                model = SentenceTransformer('all-MiniLM-L6-v2')
                 model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
                 embeddings = model.encode(german_dataset['train']['arg2'])
                 self.save_tensor(embeddings, file_name=self.emb_file_name, path=self.path)

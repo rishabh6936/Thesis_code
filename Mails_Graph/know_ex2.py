@@ -5,7 +5,6 @@ from sentence_transformers import SentenceTransformer
 from nltk import RegexpTokenizer
 import re
 import torch
-import spacy
 
 class KnowExtract:
     def __init__(self, text, trie, source_type=None):
@@ -16,21 +15,10 @@ class KnowExtract:
 #        self.model = SentenceTransformer('all-MiniLM-L6-v2')
 #        self.model = self.model.to('cpu')
         self.model.to(torch.device('cpu'))
-        self.source_type = source_type
-        self.stopwords = None
         self.context_node_embedding = None
-        self.entities = None
-        self.all_trippels = None
-        self.trippels = None
-        self.neighborhood = None
-        self.graph_edges = None
-        self.nodes_embedding = None
-        self.set_stopwords()
+#        self.set_stopwords()
         self.set_context_node_embedding()
-        self.set_entities()
-        self.pos_tagging()
-        self.init_data()
-        self.add_occurence_nodes()
+
 
     def init_data(self):
         tail = np.char.array(self.entities)
@@ -47,10 +35,8 @@ class KnowExtract:
     def add_occurence_nodes(self):
         tail = np.char.array(self.entities)
         l = len(tail)
-        occurrence_nodes_before= []
-        occurrence_nodes_after = []
-        self.data['edges_before'] = []
-        self.data['edges_after'] = []
+        self.data['occurence_nodes_before'] = []
+        self.data['occurence_nodes_after'] = []
         for entity in tail:
             entity_index = self.text.find(entity)
             if entity_index == -1:
@@ -74,27 +60,21 @@ class KnowExtract:
             if sentence_after == [] or sentence_after is None:
                 sentence_after = 'Empty node'
 
-            occurrence_nodes_before.append(sentence_before)
-            occurrence_nodes_after.append(sentence_after)
+            self.data['occurence_nodes_before'].append(sentence_before)
+            self.data['occurence_nodes_after'].append(sentence_after)
 
-        relation_before = np.char.array("comes before")
+        relation_before = np.char.array("mentioned in")
         relation_before = np.resize(relation_before, (l))
-#
-        edges_before = np.char.array([occurrence_nodes_before, tail, relation_before]).T
 
-        relation_after = np.char.array("comes after")
+        edges_before = np.char.array([self.data['occurence_nodes_before'], tail, relation_before]).T
+
+        relation_after = np.char.array("comes before")
         relation_after = np.resize(relation_after, (l))
 
-        edges_after = np.char.array([occurrence_nodes_after, tail, relation_after]).T
+        edges_after = np.char.array([self.data['occurence_nodes_after'], tail, relation_after]).T
 
-        for e in edges_before:
-            if e[0] != 'Empty node' and e[1] != 'Empty node':
-                self.data['edges_before'].append(e)
 
-        for e in edges_after:
-            if e[0] != 'Empty node' and e[1] != 'Empty node':
-                self.data['edges_after'].append(e)
-
+        #return sentence_before, sentence_after
 
     def get_data(self, key):
         return self.data[key]
@@ -119,10 +99,11 @@ class KnowExtract:
         return self.stopwords
 
     def set_context_node_embedding(self):
-        self.context_node_embedding = self.model.encode([self.text])
+
+       self.context_node_embedding = self.model.encode([self.text])
 #        x = self.model.encode('Hello')
-        self.context_node_embedding = torch.tensor(self.context_node_embedding)
-        self.context_node_embedding = self.context_node_embedding.to("cpu")
+       self.context_node_embedding = torch.tensor(self.context_node_embedding)
+       self.context_node_embedding = self.context_node_embedding.to("cpu")
 
     def get_text_embedding(self):
         return self.text_embedding
@@ -135,18 +116,6 @@ class KnowExtract:
         text_tokenized = tokenizer.tokenize(self.text)
         entities = [word for word in text_tokenized if not word.lower() in self.stopwords]
         self.entities = entities
-
-    def pos_tagging(self):
-        nlp_de = spacy.load('de_core_news_sm')
-        filtered_entities = []
-        for entity in self.entities:
-            doc = nlp_de(str(entity))
-            # Keep the entity only if all tokens are nouns
-            if all(token.pos_ == 'NOUN' for token in doc):
-                filtered_entities.append(entity)
-
-        self.entities = filtered_entities
-
 
     def get_entities(self):
         return self.entities
@@ -218,10 +187,6 @@ class KnowExtract:
         trippels = []
         emb = []
         for fact in facts:
-            if '/' in fact:
-                split_word = fact.split('/')
-                if len(split_word) > 3:  # Ensure there are at least 4 parts
-                    fact = split_word[3]  # Access the fourth part (index 3)
             fact = fact.lower()
             trippel, embedding = self.trie.query(fact)
             trippels += trippel

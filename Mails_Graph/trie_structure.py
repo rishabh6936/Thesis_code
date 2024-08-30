@@ -25,7 +25,7 @@ class TrieNode:
 #        self.embedding = []
 
 
-class Trie(object):
+class Trie_hash(object):
     """The trie object"""
 
     def __init__(self):
@@ -84,4 +84,4 @@ class Trie(object):
                 # cannot found the prefix, return empty list
                 return []
 
-        ret
+        return node.values

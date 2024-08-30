@@ -7,6 +7,8 @@ class TrieNode:
         # the character stored in this node
         self.char = char
 
+        self.word = None
+
         # whether this can be the end of a word
         self.is_end = False
 
@@ -67,6 +69,8 @@ class Trie(object):
 
         # Increment the counter to indicate that we see this word once more
         node.counter += 1
+
+        node.word = word
 
     def query(self, x):
         """Given an input (a prefix), retrieve all words stored in
