@@ -18,8 +18,8 @@ def main():
     graph = nx.MultiGraph()
     node_creation(graph, trie_hash, dictionary,gb)
 #    edge_creation(graph, gb, new_nodes)
-#    visualise_graph(graph)
-    save_graph(graph)
+    visualise_graph(graph)
+#    save_graph(graph)
 
 #    edge_creation(graph, dictionary,trie)
 

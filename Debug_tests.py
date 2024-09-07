@@ -58,7 +58,7 @@ def searchRecursive( node, letter, word, previousRow, results, maxCost ):
                 results, maxCost )
 
 def main():
-        TARGET = 'struktue'
+        TARGET = 'aufgwbe'
         MAX_COST = 1
 
         # Keep some interesting statistics
