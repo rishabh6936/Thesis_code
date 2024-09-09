@@ -2,13 +2,13 @@ import networkx as nx
 import spacy
 import matplotlib.pyplot as plt
 import hashlib
-from networkx.classes import graph
-from trie_conceptnet import Trie
+import pickle
 from trie_structure import Trie_hash
 from Graph_builder import GraphBuilder
 from knowledge_extractor import KnowExtract
 from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 import torch
 import numpy as np
 import re
@@ -40,10 +40,11 @@ def node_creation(graph, trie_hash, dictionary, gb):
 
 
 def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
+    best_match_word = ''
     email = [value for key, value in new_nodes if key == 'Text']
     if isinstance(email, list):
         email = ''.join(email)  # Convert list to string
-    email = preorocess_mail(email)
+    email = preprocess_mail(email)
 
     msg_sub = KnowExtract(email, gb.trie, 2)
     for hop in range(4):
@@ -57,20 +58,26 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
             graph.add_edge(email, value, edge_type=key)
 
     for entity in msg_sub.data['knowledge_nodes']:
+        std_entity = entity.replace('ß', 'ss')
         norm_entity = normalize_nodes(entity)
         hash_value = hashing_function(norm_entity)
         node_check = trie_hash.query(hash_value)
         if node_check:  # if entity already in graph
             graph.add_edge(email, norm_entity, edge_type='belongs_to')
         else:  # if entity not in graph
-            spell_check = gb.trie.query(norm_entity)
+            spell_check = gb.trie.query(norm_entity.lower())
             if spell_check != ([], []):  # node not misspelled, conceptNet returns something
                 set_trie_hash(trie_hash, hash_value, norm_entity)  # add to hash
                 graph.add_edge(email, norm_entity, edge_type='belongs_to')  # add to graph
             else:  # nodes probably misspelled, conceptNet returns nothing
-                similar_words = gb.trie.search(entity.lower(), 1)  # fetch similar words
+                similar_words = gb.trie.search(std_entity.lower(), 1)  # fetch similar words
                 if similar_words != []:
-                 pick_best_match(entity,similar_words, email,gb)
+                    best_match_word = pick_best_match(entity, similar_words, email, gb)
+                    if best_match_word == '' or best_match_word is None:
+                        continue
+                    norm_entity = normalize_nodes(best_match_word)
+                    set_trie_hash(trie_hash, hash_value, norm_entity)
+                    graph.add_edge(email, norm_entity, edge_type='belongs_to')
 
     for entity in msg_sub.data['edges_before']:
         for i in range(len(entity[0])):
@@ -101,12 +108,19 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
                 graph.add_edge(email, node_after, edge_type='belongs_to')"""
 
 
-def pick_best_match(entity, similar_words, email,gb):
+def split_conceptnet_word(conceptnet_word):
+    split_word = conceptnet_word[0].split('/')
+    actual_word = split_word[3]
+    return actual_word
+
+
+def pick_best_match(entity, similar_words, email, gb):
     sentence_pattern = r'([^.?!]*[.?!])'
     sentences = re.findall(sentence_pattern, email)
     word_similarity_data = []
+    sentence_hit = ''
     # Iterate through sentences and check if the entity is present
-#    word = word[0].split('/')[3]
+    #    word = word[0].split('/')[3]
 
     entity_pattern = re.compile(rf'\b{re.escape(entity)}\b')
 
@@ -116,38 +130,74 @@ def pick_best_match(entity, similar_words, email,gb):
             break  # If you want to stop after the first match
 
     # Find the token index corresponding to the entity
-    misspelled_entity_embedding= find_token_indices( entity,sentence_hit)
-    for word in similar_words:
-        x, similar_word_embedding = gb.trie.query(word)
-        score = compute_similarity(misspelled_entity_embedding,similar_word_embedding)
-        word_similarity_data.append([word, score])
+    if sentence_hit != '':
+        misspelled_entity_embedding = find_token_indices(entity, sentence_hit)
+        for word in similar_words:
+            x, similar_word_embedding = gb.trie.query(split_conceptnet_word(word))
+            similar_word_embedding_tensors = [torch.from_numpy(embedding) for embedding in similar_word_embedding]
+            stacked_embeddings = torch.stack(similar_word_embedding_tensors)
+            summed_embeddings = stacked_embeddings.sum(dim=0)
+            s_word_emb = summed_embeddings.unsqueeze(0)
+            score = compute_similarity(misspelled_entity_embedding, s_word_emb)
+            word_similarity_data.append([word, score])
 
-    return word_similarity_data
+        max_similar_word = get_max_similarity_word(word_similarity_data)
+        max_sim_word = split_conceptnet_word(max_similar_word[0])
+        return max_sim_word
+    else:
+        return None
 
 
+def get_max_similarity_word(word_similarity_data):
+    if not word_similarity_data:
+        return None  # Handle the case if the list is empty
+    # Initialize max values
+    max_word = ''
+    max_score = float('-inf')
+
+    # Iterate through the word_similarity_data list
+    for word, score in word_similarity_data:
+        if score > max_score:
+            max_word = word
+            max_score = score
+    return max_word, max_score
 
 
-def compute_similarity(ms_entity_embedding,similar_word_embedding):
-    similarity = model.similarity(ms_entity_embedding, similar_word_embedding)
+def compute_similarity(ms_entity_embedding, similar_word_embedding):
+    # Ensure the tensors are on the CPU
+    ms_entity_embedding_cpu = ms_entity_embedding.cpu().detach().numpy()
+    similar_word_embedding_cpu = similar_word_embedding.cpu().detach().numpy()
+
+    similarity = cosine_similarity(ms_entity_embedding_cpu, similar_word_embedding_cpu)
     return similarity
 
 
-def preorocess_mail(email):
+def preprocess_mail(email):
     text = "".join([s for s in email.splitlines(True) if s.strip("\r\n")])
     return text
 
 
-
-def find_token_indices( entity, sentence_hit):
+def find_token_indices(entity, sentence_hit):
     """Find the token indices corresponding to the entity word."""
-    split_sentence= sentence_hit.split()
-    if entity in split_sentence:
-        entity_id = split_sentence.index(entity)
-    else: return
+    split_sentence = sentence_hit.split()
+    sentence = ' '.join(sentence_hit.split())
+    entity_pattern = re.compile(rf'\b{re.escape(entity)}\b')
+    match = re.search(entity_pattern, sentence)
+    char_count = 0
+    if match:
+        # Get the matched entity
+        entity = match.group(0)
 
+        # Check if the entity exists in the split sentence and get its index
+        for word in split_sentence:
+            char_count += len(word) + 1  # +1 for the space or separator after each word
+            if char_count >= match.regs[0][0]:
+                entity_id = split_sentence.index(word)
+                break
+    else:
+        print("Entity not found in split sentence")
     embeddings = model.encode(sentence_hit, output_value="token_embeddings")
-    embeddings = embeddings[1:-1]              #remove [CLS] and [SEP]
-
+    embeddings = embeddings[1:-1]  # remove [CLS] and [SEP]
 
     enc = tokenizer(sentence_hit, add_special_tokens=False)
 
@@ -162,6 +212,7 @@ def find_token_indices( entity, sentence_hit):
     sum_entity_embeddings = entity_embeddings.sum(dim=0, keepdim=True)
 
     return sum_entity_embeddings
+
 
 #    entity_embedding = embeddings[entity_tokens[]]
 
@@ -189,7 +240,7 @@ def normalize_nodes(entity):
 
 def visualise_graph(graph):
     plt.figure(figsize=(10, 7))  # Optional: Adjust the figure size for better visualization
-    nx.draw_networkx(graph, with_labels=True)  # Adjust font_size here
+    nx.draw_networkx(graph, with_labels=False)  # Adjust font_size here
     plt.show()
 
 
@@ -209,3 +260,7 @@ def save_graph(graph):
         data['id'] = idx
 
     nx.write_graphml(graph, "/Users/rishabhsingh/PycharmProjects/Mails_Graph/datasets/graph.graphml")
+
+def save_graph_pickle(graph):
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph.pkl', 'wb') as f:
+        pickle.dump(graph, f)

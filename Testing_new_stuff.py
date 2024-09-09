@@ -1,20 +1,26 @@
-from transformers import AutoTokenizer
+import numpy as np
+import faiss
+from gensim.parsing.preprocessing import STOPWORDS
 from sentence_transformers import SentenceTransformer
+from nltk import RegexpTokenizer
+import re
+import torch
+import spacy
 
-model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-tokenizer = model.tokenizer
+text = 'Ich möchte meine Klaszr Punkte wissen, Wie ist meine Note eigentlich? Aus welche Fachgebeet sind Sie. Das ist suuper'
+german_pronouns = set(['ich', 'du', 'er', 'sie', 'es', 'wir', 'ihr', 'sie', 'der', 'die', 'das'])  # German equivalents
+english_pronouns = set(['I', 'you', 'he', 'she', 'it', 'we', 'they'])
 
-str = "Sehr geehrter Herr Hotait, die Gesamtpunktzahl von 79,83 in ISIS ist bereits die resultierende nach der Klausureinsicht"
+# Set of integers from 0 to 9 as strings
+integer_stopwords = set([str(i) for i in range(1000)])
 
-enc = tokenizer(str, add_special_tokens=False)
+# Combine all stopwords
+stopwords = STOPWORDS.union(english_pronouns).union(german_pronouns).union(integer_stopwords)
 
-desired_output = []
-tokens = tokenizer.tokenize(str)
-#BatchEncoding.word_ids returns a list mapping words to tokens
-for w_idx in set(enc.word_ids()):
-    #BatchEncoding.word_to_tokens tells us which and how many tokens are used for the specific word
-    start, end = enc.word_to_tokens(w_idx)
-    desired_output.append(list(range(start,end)))
 
-print(desired_output)
-print(tokens)
+
+
+tokenizer = RegexpTokenizer(r"\w+")
+text_tokenized = tokenizer.tokenize(text)
+entities = [word for word in text_tokenized if not word.lower() in stopwords]
+print(entities)

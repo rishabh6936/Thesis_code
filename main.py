@@ -1,5 +1,5 @@
 import torch
-from graph_creation import node_creation, visualise_graph, save_graph
+from graph_creation import node_creation, visualise_graph, save_graph_pickle
 import networkx as nx
 import json
 import matplotlib.pyplot as plt
@@ -20,6 +20,7 @@ def main():
 #    edge_creation(graph, gb, new_nodes)
     visualise_graph(graph)
 #    save_graph(graph)
+    save_graph_pickle(graph)
 
 #    edge_creation(graph, dictionary,trie)
 
