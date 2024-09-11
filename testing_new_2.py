@@ -13,7 +13,7 @@ tokenizer = model.tokenizer
 
 
 
-def find_token_indices( entity, sentence_hit):
+def find_token_indices_embed( entity, sentence_hit):
     """Find the token indices corresponding to the entity word."""
     split_sentence = sentence_hit.split()
     sentence = ' '.join(sentence_hit.split())
@@ -27,7 +27,7 @@ def find_token_indices( entity, sentence_hit):
         # Check if the entity exists in the split sentence and get its index
         for word in split_sentence:
             char_count += len(word) + 1  # +1 for the space or separator after each word
-            if char_count >= match.regs[0][0]:
+            if char_count > match.regs[0][0]:
                 entity_id = split_sentence.index(word)
                 break
     else:
@@ -50,6 +50,20 @@ def find_token_indices( entity, sentence_hit):
 
     return sum_entity_embeddings
 
+def replace_misspelled_candidate(misspelled_word, similar_word, sentence):
+    split_sentence = sentence.split()
+    replaced_sentence = []
+    for word in split_sentence:
+        if word == misspelled_word:
+            replaced_sentence.append(similar_word)
+        else:
+            replaced_sentence.append(word)
+
+    replaced_sentence = ' '.join(replaced_sentence)
+    return replaced_sentence
+
+
+
 def compute_similarity(ms_entity_embedding,similar_word_embedding,word):
     # Ensure the tensors are on the CPU
     ms_entity_embedding_cpu = ms_entity_embedding.cpu().detach().numpy()
@@ -58,7 +72,7 @@ def compute_similarity(ms_entity_embedding,similar_word_embedding,word):
     similarity = cosine_similarity(ms_entity_embedding_cpu, similar_word_embedding_cpu)
     return similarity
 
-def pick_best_match(entity, similar_words, email,gb):
+def pick_best_match(misspelled_word, similar_words, email,gb):
     sentence_pattern = r'([^.?!]*[.?!])'
     sentences = re.findall(sentence_pattern, email)
     word_similarity_data = []
@@ -66,7 +80,7 @@ def pick_best_match(entity, similar_words, email,gb):
     # Iterate through sentences and check if the entity is present
 #    word = word[0].split('/')[3]
 
-    entity_pattern = re.compile(rf'\b{re.escape(entity)}\b')
+    entity_pattern = re.compile(rf'\b{re.escape(misspelled_word)}\b')
 
     for sentence in sentences:
         if re.search(entity_pattern, sentence):
@@ -75,25 +89,37 @@ def pick_best_match(entity, similar_words, email,gb):
 
     # Find the token index corresponding to the entity
     if sentence_hit != '':
-        misspelled_entity_embedding= find_token_indices( entity,email)
-        for word in similar_words:
-            x, similar_word_embedding = gb.trie.query((word[0].split('/'))[3])
-            similar_word_embedding_tensors = [torch.from_numpy(embedding) for embedding in similar_word_embedding]
-            stacked_embeddings = torch.stack(similar_word_embedding_tensors)
+        misspelled_entity_embedding= find_token_indices_embed( misspelled_word,email)
+        for canditate_word in similar_words:
+            replaced_sentence = replace_misspelled_candidate(misspelled_word,(canditate_word[0].split('/'))[3],sentence_hit)
+            candidate_embedding = find_token_indices_embed((canditate_word[0].split('/'))[3], replaced_sentence)
+            """x, candidate_trie_emb = gb.trie.query((word[0].split('/'))[3])
+            candidate_trie_emb_tensors = [torch.from_numpy(embedding) for embedding in candidate_trie_emb]
+            stacked_embeddings = torch.stack(candidate_trie_emb_tensors)
             summed_embeddings = stacked_embeddings.sum(dim=0)
-            s_word_emb = summed_embeddings.unsqueeze(0)
-            score = compute_similarity(misspelled_entity_embedding,s_word_emb, word)
-            word_similarity_data.append([word, score])
-        print('Misspelled entity:', entity)
+            c_word_emb = summed_embeddings.unsqueeze(0)"""
+            c_trie_emb = get_trie_embedding(gb,canditate_word)
+            score = compute_similarity(candidate_embedding,c_trie_emb, canditate_word)
+            word_similarity_data.append([canditate_word, score])
+        print('Misspelled entity:', misspelled_word)
         print(word_similarity_data)
         return word_similarity_data
     else:
         return None
+def get_trie_embedding(gb,word):
+    x, candidate_trie_emb = gb.trie.query((word[0].split('/'))[3])
+    candidate_trie_emb_tensors = [torch.from_numpy(embedding) for embedding in candidate_trie_emb]
+    stacked_embeddings = torch.stack(candidate_trie_emb_tensors)
+    summed_embeddings = stacked_embeddings.sum(dim=0)
+    c_word_emb = summed_embeddings.unsqueeze(0)
+    return c_word_emb
+
 
 def main():
-    email = 'Auf unserer Website finden Sie detaillierte Beschreibungen und weitere Informationen zur Bearbeitung von Modilen und der Eintragung von Prüfer*innen https://www.tu.berlin/go209536/. Welche Personengruppen als Prüfer*innen bestellt werden können, entnehmen Sie bitte der Handreichung im Anhang.'
-    entity = 'Modilen'
+    email = 'In der Veranstaltung ""Introprog"" dieses Wintersemesters erzielte ich bei den Aufgeben 44 von 50 möglichen Punkten und im Abschlusstest 35,8 Punkte. .'
+    entity = 'Aufgeben'
     gb = GraphBuilder()
+#    replace_misspelled_candidate('Modilen', 'Modulen', email)
     similar_words = gb.trie.search(entity.lower(), 1)  # fetch similar words
     if similar_words != []:
         pick_best_match(entity, similar_words, email, gb)

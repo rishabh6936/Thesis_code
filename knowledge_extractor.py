@@ -14,7 +14,7 @@ class KnowExtract:
         self.data = {}
         self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 #        self.model = SentenceTransformer('all-MiniLM-L6-v2')
-#        self.model = self.model.to('cpu')
+        self.model = self.model.to('cpu')
         self.model.to(torch.device('cpu'))
         self.source_type = source_type
         self.stopwords = None
@@ -308,8 +308,11 @@ class KnowExtract:
         return self.neighborhood
 
     def set_entities(self):
-        tokenizer = RegexpTokenizer(r"\w+")
+#        tokenizer = RegexpTokenizer(r"\w+")
+#        text_tokenized = tokenizer.tokenize(self.text)
+        tokenizer = RegexpTokenizer(r'\d+,\d+[a-zA-Z]|\w+')
         text_tokenized = tokenizer.tokenize(self.text)
+#        text_tokenized = self.text.split()
         entities = [word for word in text_tokenized if not word.lower() in self.stopwords]
         self.entities = entities
 

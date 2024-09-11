@@ -3,7 +3,7 @@ import spacy
 import matplotlib.pyplot as plt
 import hashlib
 import pickle
-from trie_structure import Trie_hash
+from nltk import RegexpTokenizer
 from Graph_builder import GraphBuilder
 from knowledge_extractor import KnowExtract
 from datasets import load_dataset
@@ -13,8 +13,10 @@ import torch
 import numpy as np
 import re
 from tqdm import tqdm
+import gc
 
 model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+model.to(torch.device('cpu'))
 tokenizer = model.tokenizer
 
 nlp = spacy.load('de_core_news_sm')
@@ -37,6 +39,7 @@ def node_creation(graph, trie_hash, dictionary, gb):
                 if x != []:
                     new_nodes.append([key, value])
         edge_creation(graph, dictionary, gb, new_nodes, trie_hash)  # send the new nodes for edge creation
+        gc.collect()
 
 
 def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
@@ -72,9 +75,11 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
             else:  # nodes probably misspelled, conceptNet returns nothing
                 similar_words = gb.trie.search(std_entity.lower(), 1)  # fetch similar words
                 if similar_words != []:
-                    best_match_word = pick_best_match(entity, similar_words, email, gb)
-                    if best_match_word == '' or best_match_word is None:
+                    similarity_array = pick_best_match(entity, similar_words, email, gb)
+                    best_match = get_max_similarity_word(similarity_array)
+                    if best_match == '' or best_match is None:
                         continue
+                    best_match_word = split_conceptnet_word(best_match[0])
                     norm_entity = normalize_nodes(best_match_word)
                     set_trie_hash(trie_hash, hash_value, norm_entity)
                     graph.add_edge(email, norm_entity, edge_type='belongs_to')
@@ -114,15 +119,15 @@ def split_conceptnet_word(conceptnet_word):
     return actual_word
 
 
-def pick_best_match(entity, similar_words, email, gb):
+def pick_best_match(misspelled_word, similar_words, email,gb):
     sentence_pattern = r'([^.?!]*[.?!])'
     sentences = re.findall(sentence_pattern, email)
     word_similarity_data = []
     sentence_hit = ''
     # Iterate through sentences and check if the entity is present
-    #    word = word[0].split('/')[3]
+#    word = word[0].split('/')[3]
 
-    entity_pattern = re.compile(rf'\b{re.escape(entity)}\b')
+    entity_pattern = re.compile(rf'\b{re.escape(misspelled_word)}\b')
 
     for sentence in sentences:
         if re.search(entity_pattern, sentence):
@@ -131,21 +136,42 @@ def pick_best_match(entity, similar_words, email, gb):
 
     # Find the token index corresponding to the entity
     if sentence_hit != '':
-        misspelled_entity_embedding = find_token_indices(entity, sentence_hit)
-        for word in similar_words:
-            x, similar_word_embedding = gb.trie.query(split_conceptnet_word(word))
-            similar_word_embedding_tensors = [torch.from_numpy(embedding) for embedding in similar_word_embedding]
-            stacked_embeddings = torch.stack(similar_word_embedding_tensors)
-            summed_embeddings = stacked_embeddings.sum(dim=0)
-            s_word_emb = summed_embeddings.unsqueeze(0)
-            score = compute_similarity(misspelled_entity_embedding, s_word_emb)
-            word_similarity_data.append([word, score])
-
-        max_similar_word = get_max_similarity_word(word_similarity_data)
-        max_sim_word = split_conceptnet_word(max_similar_word[0])
-        return max_sim_word
+        for canditate_word in similar_words:
+            replaced_sentence = replace_misspelled_candidate(misspelled_word,split_conceptnet_word(canditate_word),sentence_hit)
+            if replaced_sentence == []:
+                return None
+            candidate_embedding = find_token_indices_embed(split_conceptnet_word(canditate_word), replaced_sentence)
+            c_trie_emb = get_trie_embedding(gb,canditate_word)
+            score = compute_similarity(candidate_embedding,c_trie_emb)
+            word_similarity_data.append([canditate_word, score])
+#        print('Misspelled entity:', misspelled_word)
+#        print(word_similarity_data)
+        return word_similarity_data
     else:
         return None
+
+def get_trie_embedding(gb,word):
+    x, candidate_trie_emb = gb.trie.query(split_conceptnet_word(word))
+    candidate_trie_emb_tensors = [torch.from_numpy(embedding) for embedding in candidate_trie_emb]
+    stacked_embeddings = torch.stack(candidate_trie_emb_tensors)
+    summed_embeddings = stacked_embeddings.sum(dim=0)
+    c_word_emb = summed_embeddings.unsqueeze(0)
+    return c_word_emb
+def replace_misspelled_candidate(misspelled_word, similar_word, sentence):
+    tokenizer = RegexpTokenizer(r'\d+,\d+[a-zA-Z]|\w+')
+    split_sentence = tokenizer.tokenize(sentence)
+
+#    split_sentence = sentence.split()
+    replaced_sentence = []
+    for word in split_sentence:
+        if word == misspelled_word:
+            replaced_sentence.append(similar_word)
+        else:
+            replaced_sentence.append(word)
+
+    replaced_sentence = ' '.join(replaced_sentence)
+    return replaced_sentence
+
 
 
 def get_max_similarity_word(word_similarity_data):
@@ -163,10 +189,10 @@ def get_max_similarity_word(word_similarity_data):
     return max_word, max_score
 
 
-def compute_similarity(ms_entity_embedding, similar_word_embedding):
+def compute_similarity(ms_entity_embedding, can_trie_embedding):
     # Ensure the tensors are on the CPU
     ms_entity_embedding_cpu = ms_entity_embedding.cpu().detach().numpy()
-    similar_word_embedding_cpu = similar_word_embedding.cpu().detach().numpy()
+    similar_word_embedding_cpu = can_trie_embedding.cpu().detach().numpy()
 
     similarity = cosine_similarity(ms_entity_embedding_cpu, similar_word_embedding_cpu)
     return similarity
@@ -177,12 +203,12 @@ def preprocess_mail(email):
     return text
 
 
-def find_token_indices(entity, sentence_hit):
+def find_token_indices_embed(entity, sentence_hit):
     """Find the token indices corresponding to the entity word."""
     split_sentence = sentence_hit.split()
     sentence = ' '.join(sentence_hit.split())
     entity_pattern = re.compile(rf'\b{re.escape(entity)}\b')
-    match = re.search(entity_pattern, sentence)
+    match = re.search(entity_pattern, sentence.lower())
     char_count = 0
     if match:
         # Get the matched entity
@@ -191,7 +217,7 @@ def find_token_indices(entity, sentence_hit):
         # Check if the entity exists in the split sentence and get its index
         for word in split_sentence:
             char_count += len(word) + 1  # +1 for the space or separator after each word
-            if char_count >= match.regs[0][0]:
+            if char_count > match.regs[0][0]:
                 entity_id = split_sentence.index(word)
                 break
     else:
@@ -210,6 +236,7 @@ def find_token_indices(entity, sentence_hit):
 
     entity_embeddings = embeddings[word_ids_arr[entity_id]]
     sum_entity_embeddings = entity_embeddings.sum(dim=0, keepdim=True)
+    del embeddings
 
     return sum_entity_embeddings
 
