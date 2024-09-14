@@ -65,7 +65,7 @@ class KnowExtract:
             entity_pos_array = sorted(entity_pos_array)
 
             #find the index of all non entity indexes
-            non_entity_pos_array = self.extract_non_entity_indexes(entity_pos_array)
+            non_entity_pos_array = self.extract_non_entity_indexes(entity_pos_array)    #
 
             relation_before = np.char.array("comes_before")
             relation_after = np.char.array("comes_after")
@@ -184,7 +184,11 @@ class KnowExtract:
         # Initialize a list to hold the non-entity strings
         non_entity_strings = []
 
+        non_entity_indexes = [item if item is not None else [0, 0] for item in non_entity_indexes]
+
         # Iterate over the list of non-entity indexes and extract the corresponding substrings
+        if non_entity_indexes is []:
+            print("No non_entity")
         for start, end in non_entity_indexes:
             if start == 0 and end == 0:
                 non_entity_strings.append('Empty_node')

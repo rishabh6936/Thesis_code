@@ -1,26 +1,14 @@
-import numpy as np
-import faiss
-from gensim.parsing.preprocessing import STOPWORDS
 from sentence_transformers import SentenceTransformer
-from nltk import RegexpTokenizer
-import re
 import torch
 import spacy
 
-text = 'Ich möchte meine Klaszr Punkte wissen, Wie ist meine Note eigentlich? Aus welche Fachgebeet sind Sie. Das ist suuper'
-german_pronouns = set(['ich', 'du', 'er', 'sie', 'es', 'wir', 'ihr', 'sie', 'der', 'die', 'das'])  # German equivalents
-english_pronouns = set(['I', 'you', 'he', 'she', 'it', 'we', 'they'])
+model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+tokenizer = model.tokenizer
 
-# Set of integers from 0 to 9 as strings
-integer_stopwords = set([str(i) for i in range(1000)])
+sentence = 'Organization Committee General Chairs Wei Xiang La Trobe University Australia Carla Fabiana Chiasserini Politecnico di Torino Italy TPC y Forum Chair Henry legung University of Calgary Workshop Chairs Teng Joon Lim University of Sydney Australia Jia Hu University of Exter U'
 
-# Combine all stopwords
-stopwords = STOPWORDS.union(english_pronouns).union(german_pronouns).union(integer_stopwords)
+embeddings = model.encode(sentence, output_value="token_embeddings")
+#embeddings = embeddings[1:-1]  # remove [CLS] and [SEP]
 
-
-
-
-tokenizer = RegexpTokenizer(r"\w+")
-text_tokenized = tokenizer.tokenize(text)
-entities = [word for word in text_tokenized if not word.lower() in stopwords]
-print(entities)
+enc = tokenizer(sentence, add_special_tokens=True)
+print(sentence)

@@ -138,9 +138,10 @@ def pick_best_match(misspelled_word, similar_words, email,gb):
     if sentence_hit != '':
         for canditate_word in similar_words:
             replaced_sentence = replace_misspelled_candidate(misspelled_word,split_conceptnet_word(canditate_word),sentence_hit)
-            if replaced_sentence == []:
-                return None
             candidate_embedding = find_token_indices_embed(split_conceptnet_word(canditate_word), replaced_sentence)
+            if replaced_sentence == [] or candidate_embedding is None:
+                return None
+
             c_trie_emb = get_trie_embedding(gb,canditate_word)
             score = compute_similarity(candidate_embedding,c_trie_emb)
             word_similarity_data.append([canditate_word, score])
@@ -200,13 +201,18 @@ def compute_similarity(ms_entity_embedding, can_trie_embedding):
 
 def preprocess_mail(email):
     text = "".join([s for s in email.splitlines(True) if s.strip("\r\n")])
+    if text =='':
+        text = 'Empty Body'
     return text
 
 
 def find_token_indices_embed(entity, sentence_hit):
     """Find the token indices corresponding to the entity word."""
-    split_sentence = sentence_hit.split()
-    sentence = ' '.join(sentence_hit.split())
+#    split_sentence = sentence_hit.split()
+#    sentence = ' '.join(sentence_hit.split())
+    tokenizer_reg = RegexpTokenizer(r'\d+,\d+[a-zA-Z]|\w+')
+    split_sentence = tokenizer_reg.tokenize(sentence_hit)
+    sentence = ' '.join(split_sentence)
     entity_pattern = re.compile(rf'\b{re.escape(entity)}\b')
     match = re.search(entity_pattern, sentence.lower())
     char_count = 0
@@ -222,10 +228,11 @@ def find_token_indices_embed(entity, sentence_hit):
                 break
     else:
         print("Entity not found in split sentence")
-    embeddings = model.encode(sentence_hit, output_value="token_embeddings")
+        return None
+    embeddings = model.encode(sentence, output_value="token_embeddings")
     embeddings = embeddings[1:-1]  # remove [CLS] and [SEP]
 
-    enc = tokenizer(sentence_hit, add_special_tokens=False)
+    enc = tokenizer(sentence, add_special_tokens=False)
 
     word_ids_arr = []
     # BatchEncoding.word_ids returns a list mapping words to tokens
@@ -233,6 +240,9 @@ def find_token_indices_embed(entity, sentence_hit):
         # BatchEncoding.word_to_tokens tells us which and how many tokens are used for the specific word
         start, end = enc.word_to_tokens(w_idx)
         word_ids_arr.append(list(range(start, end)))
+
+    if max(word_ids_arr[entity_id]) >= embeddings.shape[0]:       #really weird error where tokenised array is bigger than embedding array,cheap fix
+        return None
 
     entity_embeddings = embeddings[word_ids_arr[entity_id]]
     sum_entity_embeddings = entity_embeddings.sum(dim=0, keepdim=True)
