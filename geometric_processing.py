@@ -37,6 +37,47 @@ def get_edgetype_length(src_type, tgt_type, edge_type):
     ])
     return length
 
+def process_graph(graph):
+    node_dict = {node: i for i, node in enumerate(graph.nodes)}
+    email_node_dict = get_node_type_indexes(graph,'email')
+    adresse_node_dict = get_node_type_indexes(graph, 'adresse')
+    betreff_node_dict = get_node_type_indexes(graph, 'Betreff')
+    name_node_dict = get_node_type_indexes(graph, 'name')
+    noun_node_dict = get_node_type_indexes(graph, 'noun')
+    context_node_dict = get_node_type_indexes(graph, 'context')
+    edge_index_belongs_to = get_edge_type_indexes(graph,'email','noun', node_dict)
+    print(node_dict)
+
+def get_node_type_indexes(graph,node_type):
+    type_node_dict = {
+        node: i
+        for i, node in enumerate(graph.nodes)
+        if node in dataset.nodes() and dataset.nodes[node].get('node_type') == node_type
+    }
+
+    return type_node_dict
+
+def get_edge_type_indexes(graph,src_edge_type,tgt_edge_type,node_dict):
+    edge_index = []
+    source_indices = []
+    target_indices = []
+    for edge in graph.edges(data=True):
+        source, target, attr = edge
+        # Determine the edge type based on source and target node types
+        source_type = graph.nodes[source].get('node_type')
+        target_type = graph.nodes[target].get('node_type')
+
+        if source_type == src_edge_type and target_type == tgt_edge_type:
+            source_indices.append(node_dict[source])
+            target_indices.append(node_dict[target])
+
+    # Convert lists to tensors and stack them into the geometric format
+    edge_index = torch.tensor([source_indices, target_indices], dtype=torch.long)
+    return edge_index
+
+
+process_graph(dataset)
+
 pyg = from_networkx(dataset)
 hetero_data= pyg
 

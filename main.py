@@ -1,5 +1,5 @@
 import torch
-from graph_creation import node_creation, visualise_graph, save_graph_pickle
+from graph_creation import node_creation, visualise_graph, save_graph_pickle, load_graph_pickle
 import networkx as nx
 import json
 import matplotlib.pyplot as plt
@@ -15,12 +15,12 @@ def main():
     trie_hash = Trie_hash()
     trie = Trie()
     gb = GraphBuilder()
-    graph = nx.MultiGraph()
+    graph = nx.Graph()
     node_creation(graph, trie_hash, dictionary,gb)
-#    edge_creation(graph, gb, new_nodes)
     visualise_graph(graph)
-#    save_graph(graph)
+#    load_graph_pickle()
     save_graph_pickle(graph)
+
 
 #    edge_creation(graph, dictionary,trie)
 

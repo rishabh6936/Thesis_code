@@ -14,6 +14,7 @@ import numpy as np
 import re
 from tqdm import tqdm
 import gc
+from torch_geometric.utils.convert import to_networkx, from_networkx
 
 model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 model.to(torch.device('cpu'))
@@ -48,6 +49,7 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
     if isinstance(email, list):
         email = ''.join(email)  # Convert list to string
     email = preprocess_mail(email)
+    graph.add_node(email, node_type='email', embedding=get_node_embedding(email))
 
     msg_sub = KnowExtract(email, gb.trie, 2)
     for hop in range(4):
@@ -58,6 +60,8 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
     """First add a directed edge from Email to all its respective related nodes, these nodes are not normalised"""
     for key, value in new_nodes:
         if key != "Text":
+            node_type = get_node_type(key)
+            graph.add_node(value, node_type=node_type, embedding=get_node_embedding(value))
             graph.add_edge(email, value, edge_type=key)
 
     for entity in msg_sub.data['knowledge_nodes']:
@@ -66,12 +70,16 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
         hash_value = hashing_function(norm_entity)
         node_check = trie_hash.query(hash_value)
         if node_check:  # if entity already in graph
+            graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
             graph.add_edge(email, norm_entity, edge_type='belongs_to')
+            add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
         else:  # if entity not in graph
             spell_check = gb.trie.query(norm_entity.lower())
             if spell_check != ([], []):  # node not misspelled, conceptNet returns something
                 set_trie_hash(trie_hash, hash_value, norm_entity)  # add to hash
+                graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
                 graph.add_edge(email, norm_entity, edge_type='belongs_to')  # add to graph
+                add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
             else:  # nodes probably misspelled, conceptNet returns nothing
                 similar_words = gb.trie.search(std_entity.lower(), 1)  # fetch similar words
                 if similar_words != []:
@@ -82,15 +90,21 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
                     best_match_word = split_conceptnet_word(best_match[0])
                     norm_entity = normalize_nodes(best_match_word)
                     set_trie_hash(trie_hash, hash_value, norm_entity)
+                    graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
                     graph.add_edge(email, norm_entity, edge_type='belongs_to')
+                    add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
 
     for entity in msg_sub.data['edges_before']:
         for i in range(len(entity[0])):
-            graph.add_edge(entity[0][i], entity[1], edge_type=entity[2])
+            graph.add_node(entity[0][i], node_type='sentence', embedding=get_node_embedding(entity[0][i]))
+            graph.add_node(entity[1], node_type='sentence', embedding=get_node_embedding(entity[1]))
+            graph.add_edge(entity[0][i], entity[1], edge_type=str(entity[2]))
 
     for entity in msg_sub.data['edges_after']:
         for i in range(len(entity[0])):
-            graph.add_edge(entity[0][i], entity[1], edge_type=entity[2])
+            graph.add_node(entity[0][i], node_type='sentence', embedding=get_node_embedding(entity[0][i]))
+            graph.add_node(entity[1], node_type='sentence',  embedding=get_node_embedding(entity[1]))
+            graph.add_edge(entity[0][i], entity[1], edge_type=str(entity[2]))
 
     """for entity in msg_sub.graph_edges:
         split_word = entity[0].split('/')
@@ -112,6 +126,29 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
                 graph.add_edge(email, node_before, edge_type='belongs_to')
                 graph.add_edge(email, node_after, edge_type='belongs_to')"""
 
+def get_node_embedding(node):
+    embeddings = model.encode(node)
+    return embeddings
+
+
+def get_node_type(key):
+    if key == 'Betreff':
+        return 'Betreff'
+    # Regex pattern
+    pattern = r'\(([^)]+)\)'
+    # Find all matches
+    matches = re.findall(pattern, key)
+    return matches[0].lower()
+
+
+def add_context_nodes(graph, norm_entity, graph_edges):
+    for edges in graph_edges:
+        word = split_conceptnet_word(edges)
+        norm_word = normalize_nodes(word)
+        if norm_word == norm_entity:
+            graph.add_node(edges[1], node_type='context', embedding=get_node_embedding(edges[1]))
+#            graph.add_edge(norm_entity, edges[1], edge_type=edges[2])
+            graph.add_edge(norm_entity, edges[1], edge_type='has_context')
 
 def split_conceptnet_word(conceptnet_word):
     split_word = conceptnet_word[0].split('/')
@@ -276,9 +313,13 @@ def normalize_nodes(entity):
 
 
 def visualise_graph(graph):
-    plt.figure(figsize=(10, 7))  # Optional: Adjust the figure size for better visualization
-    nx.draw_networkx(graph, with_labels=False)  # Adjust font_size here
+    plt.figure(figsize=(30, 35))  # Optional: Adjust the figure size for better visualization
+    nx.draw_networkx(graph, with_labels=True)  # Adjust font_size here
     plt.show()
+
+
+
+
 
 
 def save_graph(graph):
@@ -301,3 +342,8 @@ def save_graph(graph):
 def save_graph_pickle(graph):
     with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph.pkl', 'wb') as f:
         pickle.dump(graph, f)
+
+def load_graph_pickle():
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph.pkl', 'rb') as f:
+        graph = pickle.load(f)
+    return graph
