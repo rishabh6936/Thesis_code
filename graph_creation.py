@@ -62,7 +62,7 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
         if key != "Text":
             node_type = get_node_type(key)
             graph.add_node(value, node_type=node_type, embedding=get_node_embedding(value))
-            graph.add_edge(email, value, edge_type=key)
+            graph.add_edge(email, value, edge_type=get_clean_edge_type(key))
 
     for entity in msg_sub.data['knowledge_nodes']:
         std_entity = entity.replace('ß', 'ss')
@@ -96,14 +96,18 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
 
     for entity in msg_sub.data['edges_before']:
         for i in range(len(entity[0])):
-            graph.add_node(entity[0][i], node_type='sentence', embedding=get_node_embedding(entity[0][i]))
-            graph.add_node(entity[1], node_type='sentence', embedding=get_node_embedding(entity[1]))
+            if not graph.has_node(entity[0][i]):
+               graph.add_node(entity[0][i], node_type='sentence', embedding=get_node_embedding(entity[0][i]))
+            if not graph.has_node(entity[1]):
+               graph.add_node(entity[1], node_type='sentence', embedding=get_node_embedding(entity[1]))
             graph.add_edge(entity[0][i], entity[1], edge_type=str(entity[2]))
 
     for entity in msg_sub.data['edges_after']:
         for i in range(len(entity[0])):
-            graph.add_node(entity[0][i], node_type='sentence', embedding=get_node_embedding(entity[0][i]))
-            graph.add_node(entity[1], node_type='sentence',  embedding=get_node_embedding(entity[1]))
+            if not graph.has_node(entity[0][i]):
+                graph.add_node(entity[0][i], node_type='sentence', embedding=get_node_embedding(entity[0][i]))
+            if not graph.has_node(entity[1]):
+                graph.add_node(entity[1], node_type='sentence', embedding=get_node_embedding(entity[1]))
             graph.add_edge(entity[0][i], entity[1], edge_type=str(entity[2]))
 
     """for entity in msg_sub.graph_edges:
@@ -126,6 +130,21 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
                 graph.add_edge(email, node_before, edge_type='belongs_to')
                 graph.add_edge(email, node_after, edge_type='belongs_to')"""
 
+def get_clean_edge_type(key):
+    if key == 'Von: (Adresse)':
+        return 'sent_from'
+    if key == 'An: (Adresse)':
+        return 'sent_to'
+    if key == 'Betreff':
+        return 'title'
+    if key == 'An: (Name)':
+        return 'to_person'
+    if key == 'Von: (Name)':
+        return 'from_person'
+
+
+
+
 def get_node_embedding(node):
     embeddings = model.encode(node)
     return embeddings
@@ -133,7 +152,7 @@ def get_node_embedding(node):
 
 def get_node_type(key):
     if key == 'Betreff':
-        return 'Betreff'
+        return 'betreff'
     # Regex pattern
     pattern = r'\(([^)]+)\)'
     # Find all matches
