@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from torch_geometric.data import HeteroData
 import networkx as nx
-from torch_geometric.loader import NeighborLoader
+from torch_geometric.loader import LinkNeighborLoader
 from torch_geometric.nn import SAGEConv, to_hetero
 from torch_geometric.utils.convert import to_networkx, from_networkx
 import torch_geometric.transforms as T
@@ -27,6 +27,17 @@ with open(save_path, mode='rb') as f:
 
 node_types = set(nx.get_node_attributes(graph, 'node_type').values())
 edge_types = set(nx.get_edge_attributes(graph, 'edge_type').values())
+
+# Split edge set for training and testing
+"""edges = graph.edges()
+
+eids = np.arange(graph.number_of_edges())
+eids = np.random.permutation(eids)
+test_size = int(len(eids) * 0.1)
+train_size = graph.number_of_edges() - test_size
+test_pos_u, test_pos_v = u[eids[:test_size]], v[eids[:test_size]]
+train_pos_u, train_pos_v = u[eids[test_size:]], v[eids[test_size:]]"""
+
 def get_nodetype_length(node_type):
     length = len([n for n, attr in graph.nodes(data=True) if attr.get('node_type') == node_type])
     return length
@@ -132,7 +143,6 @@ def make_hetero_object(graph):
                               ]"""
 
 #def get_local_node_dict():
-import torch
 
 
 def map_to_local_indices(edge_index):
@@ -268,13 +278,88 @@ class HGT(torch.nn.Module):
 
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
-        return self.lin(x_dict['context'])
+#        return self.lin(x_dict['context'])
+        return x_dict
 
-model = HGT(hidden_channels=64, out_channels=12,
-            num_heads=2, num_layers=2)
+"""model = HGT(hidden_channels=64, out_channels=12,
+            num_heads=2, num_layers=2)"""
 
 hetero_data.validate()
-with torch.no_grad():  # Initialize lazy modules.
-    out = model(hetero_data.x_dict, hetero_data.edge_index_dict)
+"""with torch.no_grad():  # Initialize lazy modules.
+    out = model(hetero_data.x_dict, hetero_data.edge_index_dict)"""
 
-print(hetero_data)
+transform = T.RandomLinkSplit(
+    num_val=0.1,
+    num_test=0.1,
+    disjoint_train_ratio=0.3,
+    neg_sampling_ratio=2.0,
+    add_negative_train_samples=False,
+    edge_types=("email", "belongs_to", "noun"),
+    rev_edge_types=("noun", "belongs_to", "email"),
+)
+train_data, val_data, test_data = transform(hetero_data)
+
+# Define seed edges:
+edge_label_index = train_data["email", "belongs_to", "noun"].edge_label_index
+hetero_data["email", "belongs_to", "noun"].edge_label = train_data["email", "belongs_to", "noun"].edge_label
+"""train_loader = LinkNeighborLoader(
+    data=train_data,
+    num_neighbors=[20, 10],
+    neg_sampling_ratio=2.0,
+    edge_label_index=(("email", "belongs_to", "noun"), edge_label_index),
+    edge_label=edge_label,
+    batch_size=128,
+    shuffle=True,
+)"""
+
+class Classifier(torch.nn.Module):
+    def forward(self, x_email: torch.Tensor, x_noun: torch.Tensor, edge_label_index: torch.Tensor) -> torch.Tensor:
+        # Convert node embeddings to edge-level representations:
+        edge_feat_email = x_email[edge_label_index[0]]
+        edge_feat_noun = x_noun[edge_label_index[1]]
+
+        # Apply dot-product to get a prediction per supervision edge:
+        return (edge_feat_email * edge_feat_noun).sum(dim=-1)
+
+
+class Model(torch.nn.Module):
+    def __init__(self, hidden_channels, out_channels, num_heads, num_layers, metadata):
+        super().__init__()
+        # HGT for heterogeneous graphs
+        self.hgt = HGT(hidden_channels, out_channels, num_heads, num_layers)
+        self.classifier = Classifier()
+
+    def forward(self, data):
+        # x_dict contains the feature matrices of all node types
+        # edge_index_dict contains the edge indices for all edge types
+        x_dict = self.hgt(data.x_dict, data.edge_index_dict)
+
+        # Get predictions for "email belongs_to noun" edges using the classifier
+        pred = self.classifier(
+            x_dict["email"],
+            x_dict["noun"],
+            edge_label_index,
+        )
+
+        return pred
+
+# Instantiate the model
+model = Model(hidden_channels=64, out_channels=12, num_heads=2, num_layers=2, metadata=hetero_data.metadata())
+# Initialize lazy modules
+"""with torch.no_grad():
+    out = model(hetero_data)"""
+
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+for epoch in range(1, 100):
+        total_loss = total_examples = 0
+        optimizer.zero_grad()
+        pred = model(hetero_data)
+        ground_truth = hetero_data["email", "belongs_to", "noun"].edge_label
+        loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
+        loss.backward()
+        optimizer.step()
+        total_loss += float(loss) * pred.numel()
+        total_examples += pred.numel()
+        print(f"Epoch: {epoch:03d}, Loss: {total_loss / total_examples:.4f}")
+
+#print(hetero_data)
