@@ -350,6 +350,7 @@ model = Model(hidden_channels=64, out_channels=12, num_heads=2, num_layers=2, me
     out = model(hetero_data)"""
 
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
 for epoch in range(1, 100):
         total_loss = total_examples = 0
         optimizer.zero_grad()
