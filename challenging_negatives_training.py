@@ -6,10 +6,29 @@ from Graph_builder import GraphBuilder
 from knowledge_extractor import KnowExtract
 from geometric_data_object import GeometricDataObject
 import copy
+import torch
+from sentence_transformers import SentenceTransformer
 
 #gb = GraphBuilder()
 # Load pre-trained word vectors (e.g., 'glove-wiki-gigaword-100' or 'word2vec-google-news-300')
 glove_vectors = gensim.downloader.load('word2vec-google-news-300')  # or 'word2vec-google-news-300'
+model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+model.to(torch.device('cpu'))
+
+save_path = '/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph.pkl'
+with open(save_path, mode='rb') as f:
+    graph = pickle.load(f)
+def get_node_embedding(node):
+    embeddings = model.encode(node)
+    return embeddings
+
+def get_corrupted_embedding(word, corruption_type='misspelled'):
+    if corruption_type == 'misspelled':
+        corrupted_word = keyboard_typo(word)
+    else:  # semantic corruption
+        corrupted_word = get_closest_word(glove_vectors, word)
+    corrupted_embedding = get_node_embedding(corrupted_word)
+    return corrupted_embedding, corrupted_word
 
 def keyboard_typo(word):
     import random
@@ -27,6 +46,10 @@ def keyboard_typo(word):
         word = word[:idx] + typo_char + word[idx + 1:]
     return word
 
+def get_closest_word(glove_vectors, word):
+    similar_words = glove_vectors.most_similar(word)
+    closest_word = similar_words[0][0] if similar_words else word
+    return closest_word
 def get_sentence_in_email(word,email):
     sentence_pattern = r'([^.?!]*[.?!])'
     sentences = re.findall(sentence_pattern, email)
@@ -43,14 +66,11 @@ def get_sentence_in_email(word,email):
             break
     return sentence_hit
 
-save_path = '/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph.pkl'
-with open(save_path, mode='rb') as f:
-    graph = pickle.load(f)
 
-geometric_data_object = GeometricDataObject(graph)
+#geometric_data_object = GeometricDataObject(graph)
 email_nodes = [node for node, attr in graph.nodes(data=True) if attr.get('node_type') == 'email']
 
-suitable_edges = []
+"""suitable_edges = []
 for email in email_nodes:
     email_edges = graph.edges(email, data=True)
     for edge in email_edges:
@@ -61,7 +81,7 @@ for email in email_nodes:
         attr_type = attr['edge_type']
 
         if source_type == 'email' and target_type == 'noun' and attr_type == 'belongs_to':
-           suitable_edges.append(edge)
+           suitable_edges.append(edge)"""
 
 
 """for edges in suitable_edges:
@@ -92,16 +112,23 @@ def create_corrupted_graphs(graph):
         for edge in email_edges:
             source, target, attr = edge
             if graph.nodes[source]['node_type'] == 'email' and graph.nodes[target]['node_type'] == 'noun' and attr['edge_type'] == 'belongs_to':
-                noun_word = graph.nodes[target]['value']  # Assuming the noun is stored in the 'value' attribute
+                noun_word = target  # Assuming 'target' is the noun
 
-                # Corrupt with a keyboard typo
-                typo_word = keyboard_typo(noun_word)
-                typo_graph.nodes[target]['value'] = typo_word
 
-                # Corrupt with a semantically similar word
-                similar_word = find_similar_word(noun_word)
-                similar_word_graph.nodes[target]['value'] = similar_word
+                # Replace with misspelled version
+                misspelled_embedding, misspelled_word = get_corrupted_embedding(noun_word, 'misspelled')
+                graph.add_node(misspelled_word, node_type='noun', embedding=misspelled_embedding)
+
+                # Replace with semantic corruption
+                similar_embedding, similar_word = get_corrupted_embedding(noun_word, 'semantic')
+                graph.add_node(similar_word, node_type='noun', embedding=similar_embedding)
+
+                # Add edges with corrupt nouns
+                graph.add_edge(source, misspelled_word, edge_type='belongs_to')
+                graph.add_edge(source, similar_word, edge_type='belongs_to')
 
     return typo_graph, similar_word_graph
+
+typo_graph, similar_word_graph = create_corrupted_graphs()
 
 print(graph)
