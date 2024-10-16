@@ -72,14 +72,16 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
         if node_check:  # if entity already in graph
             graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
             graph.add_edge(email, norm_entity, edge_type='belongs_to')
-            add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
+            if msg_sub.graph_edges is not None:
+                add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
         else:  # if entity not in graph
             spell_check = gb.trie.query(norm_entity.lower())
             if spell_check != ([], []):  # node not misspelled, conceptNet returns something
                 set_trie_hash(trie_hash, hash_value, norm_entity)  # add to hash
                 graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
                 graph.add_edge(email, norm_entity, edge_type='belongs_to')  # add to graph
-                add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
+                if msg_sub.graph_edges is not None:
+                    add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
             else:  # nodes probably misspelled, conceptNet returns nothing
                 similar_words = gb.trie.search(std_entity.lower(), 1)  # fetch similar words
                 if similar_words != []:
@@ -92,7 +94,8 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
                     set_trie_hash(trie_hash, hash_value, norm_entity)
                     graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
                     graph.add_edge(email, norm_entity, edge_type='belongs_to')
-                    add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
+                    if msg_sub.graph_edges is not None:
+                       add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
 
     for entity in msg_sub.data['edges_before']:
         for i in range(len(entity[0])):
@@ -359,10 +362,10 @@ def save_graph(graph):
     nx.write_graphml(graph, "/Users/rishabhsingh/PycharmProjects/Mails_Graph/datasets/graph.graphml")
 
 def save_graph_pickle(graph):
-    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph.pkl', 'wb') as f:
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_small.pkl', 'wb') as f:
         pickle.dump(graph, f)
 
 def load_graph_pickle():
-    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph.pkl', 'rb') as f:
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_small.pkl', 'rb') as f:
         graph = pickle.load(f)
     return graph
