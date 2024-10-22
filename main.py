@@ -8,15 +8,15 @@ from networkx.classes import graph
 from trie_conceptnet import Trie
 from trie_structure import Trie_hash
 from Graph_builder import GraphBuilder
-"""import spacy
+import spacy
 from challenging_negatives_training import create_corrupted_graphs, preprocess_graphs
 import pickle
 from sentence_transformers import SentenceTransformer
 import gc
 import fasttext
 import fasttext.util
-"""
 
+"""
 def main():
     dictionary = json.load(open('/Users/rishabhsingh/Downloads/tumail.json', 'r'))
     trie_hash = Trie_hash()
@@ -27,8 +27,8 @@ def main():
     visualise_graph(graph)
 #    load_graph_pickle()
     save_graph_pickle(graph)
-
 """
+
 def main():
     # Download and load the fasttext model
     fasttext.util.download_model('de', if_exists='ignore')  # German model
@@ -44,13 +44,13 @@ def main():
     with open(save_path, mode='rb') as f:
         graph = pickle.load(f)
     email_nodes = [node for node, attr in graph.nodes(data=True) if attr.get('node_type') == 'email']
-    typo_graph, similar_word_graph = create_corrupted_graphs(graph,email_nodes)
-    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/typo_graph_500.pkl', 'wb') as f:
-        pickle.dump(typo_graph ,f)
-    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/similar_word_graph_500.pkl', 'wb') as f:
-        pickle.dump(similar_word_graph ,f)
+#    typo_graph, similar_word_graph = create_corrupted_graphs(graph,email_nodes)
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/typo_graph_500.pkl', 'rb') as f:
+        typo_graph = pickle.load(f)
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/similar_word_graph_500.pkl', 'rb') as f:
+        similar_word_graph = pickle.load(f)
     preprocess_graphs(typo_graph, similar_word_graph, graph)
-"""
+
 
 
 if __name__ == '__main__':

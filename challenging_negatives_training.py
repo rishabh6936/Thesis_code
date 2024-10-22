@@ -23,9 +23,9 @@ ft = fasttext.load_model('cc.de.300.bin')
 model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 model.to(torch.device('cpu'))
 
-save_path = '/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_small.pkl'
+"""save_path = '/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_small.pkl'
 with open(save_path, mode='rb') as f:
-    graph = pickle.load(f)
+    graph = pickle.load(f)"""
 
 
 def get_node_embedding(node):
@@ -100,7 +100,7 @@ def get_sentence_in_email(word, email):
 
 
 # geometric_data_object = GeometricDataObject(graph)
-email_nodes = [node for node, attr in graph.nodes(data=True) if attr.get('node_type') == 'email']
+#email_nodes = [node for node, attr in graph.nodes(data=True) if attr.get('node_type') == 'email']
 
 """suitable_edges = []
 for email in email_nodes:

@@ -71,7 +71,7 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
         node_check = trie_hash.query(hash_value)
         if node_check:  # if entity already in graph
             graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
-            graph.add_edge(email, norm_entity, edge_type='belongs_to')
+            graph.add_edge(email, norm_entity, edge_type='belongs_to', is_predicted=False)
             if msg_sub.graph_edges is not None:
                 add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
         else:  # if entity not in graph
@@ -79,12 +79,13 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
             if spell_check != ([], []):  # node not misspelled, conceptNet returns something
                 set_trie_hash(trie_hash, hash_value, norm_entity)  # add to hash
                 graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
-                graph.add_edge(email, norm_entity, edge_type='belongs_to')  # add to graph
+                graph.add_edge(email, norm_entity, edge_type='belongs_to', is_predicted=False)  # add to graph
                 if msg_sub.graph_edges is not None:
                     add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
             else:  # nodes probably misspelled, conceptNet returns nothing
                 similar_words = gb.trie.search(std_entity.lower(), 1)  # fetch similar words
-                if similar_words != []:
+                #version 1 with embedding similarity
+                """if similar_words != []:
                     similarity_array = pick_best_match(entity, similar_words, email, gb)
                     best_match = get_max_similarity_word(similarity_array)
                     if best_match == '' or best_match is None:
@@ -93,9 +94,25 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
                     norm_entity = normalize_nodes(best_match_word)
                     set_trie_hash(trie_hash, hash_value, norm_entity)
                     graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
-                    graph.add_edge(email, norm_entity, edge_type='belongs_to')
+                    graph.add_edge(email, norm_entity, edge_type='belongs_to', is_predicted=True)
                     if msg_sub.graph_edges is not None:
-                       add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
+                       add_context_nodes(graph, norm_entity, msg_sub.graph_edges)"""
+
+                #version 2 with the trained model
+                if similar_words != []:
+                    #similarity_array = pick_best_match(entity, similar_words, email, gb)
+                    #best_match = get_max_similarity_word(similarity_array)
+                    #if best_match == '' or best_match is None:
+                    #    continue
+                    for word in similar_words:
+                        best_match_word = split_conceptnet_word(word)
+                        norm_entity = normalize_nodes(best_match_word)
+                        set_trie_hash(trie_hash, hash_value, norm_entity)
+                        graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
+                        graph.add_edge(email, norm_entity, edge_type='belongs_to', is_predicted=True)
+                        if msg_sub.graph_edges is not None:
+                            add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
+
 
     for entity in msg_sub.data['edges_before']:
         for i in range(len(entity[0])):
@@ -335,8 +352,8 @@ def normalize_nodes(entity):
 
 
 def visualise_graph(graph):
-    plt.figure(figsize=(30, 35))  # Optional: Adjust the figure size for better visualization
-    nx.draw_networkx(graph, with_labels=True)  # Adjust font_size here
+    plt.figure(figsize=(30, 35))  # Adjust the figure size for better visualization
+    nx.draw_networkx(graph, with_labels=True)
     plt.show()
 
 
@@ -362,10 +379,10 @@ def save_graph(graph):
     nx.write_graphml(graph, "/Users/rishabhsingh/PycharmProjects/Mails_Graph/datasets/graph.graphml")
 
 def save_graph_pickle(graph):
-    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_small.pkl', 'wb') as f:
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_500.pkl', 'wb') as f:
         pickle.dump(graph, f)
 
 def load_graph_pickle():
-    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_small.pkl', 'rb') as f:
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_500.pkl', 'rb') as f:
         graph = pickle.load(f)
     return graph
