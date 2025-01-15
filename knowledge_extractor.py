@@ -13,6 +13,8 @@ class KnowExtract:
         self.text = text
         self.data = {}
         self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+        self.nlp_de = spacy.load('de_core_news_sm')
+        self.nlp_en = spacy.load('en_core_web_sm')
 #        self.model = SentenceTransformer('all-MiniLM-L6-v2')
         self.model = self.model.to('cpu')
         self.model.to(torch.device('cpu'))
@@ -30,7 +32,7 @@ class KnowExtract:
         self.set_stopwords()
         self.set_context_node_embedding()
         self.set_entities()
-        self.normalize_sentence()
+#        self.normalize_sentence()
         self.pos_tagging()
         self.init_data()
         self.add_occurrence_nodes()
@@ -100,11 +102,11 @@ class KnowExtract:
             edges_after = np.char.array([occurrence_nodes_after, tail, relation_after]).T"""
 
             for e in edges_before:
-                if e[0] != 'Empty node' and e[1] != 'Empty node':
+                if e[0] != 'Empty_node' or e[1] != 'Empty_node':
                     self.data['edges_before'].append(e)
 
             for e in edges_after:
-                if e[0] != 'Empty node' and e[1] != 'Empty node':
+                if e[0] != 'Empty_node' or e[1] != 'Empty_node':
                     self.data['edges_after'].append(e)
 
 
@@ -141,16 +143,14 @@ class KnowExtract:
                     self.data['edges_after'].append(e)"""
 
     def normalize_sentence(self):
-        nlp = spacy.load('de_core_news_sm')
         # Process the sentence
-        doc = nlp(self.text)
+        doc = self.nlp_de(self.text)
 
-        # Extract lemmatized tokens, removing stop words and punctuation
+        #Extract lemmatized tokens, removing stop words and punctuation
         tokens = [token.lemma_ for token in doc if not token.is_stop and not token.is_punct]
 
         # Join tokens back into a single string
         normalized_sentence = ' '.join(tokens)
-
         return normalized_sentence
 
     def find_near_index(self,non_entity_pos_array,single_entity_indexes):
@@ -318,24 +318,31 @@ class KnowExtract:
         text_tokenized = tokenizer.tokenize(self.text)
 #        text_tokenized = self.text.split()
         entities = [word for word in text_tokenized if not word.lower() in self.stopwords]
-        self.entities = entities
+        self.entities = list(set(entities))
 
     def pos_tagging(self):
-        nlp_de = spacy.load('de_core_news_sm')
         filtered_entities = []
         for entity in self.entities:
-            doc = nlp_de(str(entity))
+            doc = self.nlp_de(str(entity))
             # Keep the entity only if all tokens are nouns
-            if all(token.pos_ == 'NOUN' for token in doc):
-                filtered_entities.append(entity)
+            for token in doc:
+                if token.pos_ == 'NOUN':
+                    filtered_entities.append(entity)
 
-        self.entities = filtered_entities
+            """if all(token.pos_ == 'NOUN' or token.pos_ == 'PER' or token.pos_ == 'ORG' for token in doc):
+                filtered_entities.append(entity)"""
+        """for entity in self.entities:
+            doc = self.nlp_en(str(entity))
+            # Keep the entity PERSON if all tokens are nouns
+            if any(ent.label_ == 'PERSON' for ent in doc.ents):
+                filtered_entities.append(entity)"""
+
+        self.entities = list(set(filtered_entities))
 
     def normalize_nodes(self):
-        nlp = spacy.load('de_core_news_sm')
         filtered_entities = []
         for entity in self.entities:
-            doc = nlp(entity)
+            doc = self.nlp_de(entity)
             for token in doc:
                 lemma = token.lemma_
                 filtered_entities.append(lemma)

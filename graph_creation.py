@@ -1,9 +1,13 @@
 import networkx as nx
 import spacy
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 import hashlib
 import pickle
+import nltk
 from nltk import RegexpTokenizer
+from nltk.tokenize import sent_tokenize
 from Graph_builder import GraphBuilder
 from knowledge_extractor import KnowExtract
 from datasets import load_dataset
@@ -14,13 +18,17 @@ import numpy as np
 import re
 from tqdm import tqdm
 import gc
+from hgt_link_prediction import LinkPrediction
+
+nltk.download('punkt_tab', quiet=True)
+
 from torch_geometric.utils.convert import to_networkx, from_networkx
 
 model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 model.to(torch.device('cpu'))
 tokenizer = model.tokenizer
 
-nlp = spacy.load('de_core_news_sm')
+nlp_de = spacy.load('de_core_news_sm')
 path = '/Users/rishabhsingh/Shira_thesis/Crawlers/dia_trans_net/data/conceptNet_embs',
 save_path = '/Users/rishabhsingh/PycharmProjects/Mails_Graph/datasets/',
 emb_file_name = 'conceptnet_embs_eng'
@@ -41,8 +49,58 @@ def node_creation(graph, trie_hash, dictionary, gb):
                     new_nodes.append([key, value])
         edge_creation(graph, dictionary, gb, new_nodes, trie_hash)  # send the new nodes for edge creation
         gc.collect()
+    link_prediction_mechanism(graph)
 
 
+def link_prediction_mechanism(graph):
+    edges_to_remove = []
+    nodes_to_remove = []
+    edges_to_consider = []
+    #Get predictions for each node
+    predicted_labels = LinkPrediction(graph).predicted_labels
+    # assign each edge an attribute predicted_label
+    #required_edges = get_edges_of_type("email", "belongs_to", "noun", graph)
+    i = 0
+    for u, v in graph.edges():
+        if graph.edges[u, v].get('edge_type') == 'mentions' and graph.nodes[u].get('node_type') == "sentence" and graph.nodes[v].get('node_type') == 'noun':
+            edges_to_consider.append((u, v))
+            graph.edges[u, v]['predicted_label'] = predicted_labels[i] # Adding new attribute
+            i = i+1
+
+    #delete the noun nodes with attributes is_predicted = True and predicted_label = 0
+    for u, v in graph.edges():
+        if graph.edges[u, v].get('edge_type') == 'mentions' and graph.nodes[u].get('node_type') == "sentence" and graph.nodes[v].get('node_type') == 'noun':
+            if graph.edges[u, v]['predicted_label'] == 0.0 and graph.edges[u, v]['is_predicted'] == "True":
+                edges_to_remove.append((u, v))
+                nodes_to_remove.append(v)
+
+    graph.remove_edges_from(edges_to_remove)
+
+    for node in nodes_to_remove:
+        if graph.degree(node) == 0:  # Check if node is no longer connected
+            graph.remove_node(node)
+
+
+
+    print(predicted_labels)
+
+
+def get_edges_of_type(src_type, edge_type, tgt_type, graph):
+        edges = []
+        # Iterate through all edges and filter based on node types and edge types
+        for u, v, data in graph.edges(data=True):
+            # Check if the edge type and node types match
+            if data.get('edge_type') == edge_type and \
+                    graph.nodes[u].get('node_type') == src_type and \
+                    graph.nodes[v].get('node_type') == tgt_type:
+                edges.append({
+                    'source': u,
+                    'target': v,
+                    'edge_type': data["edge_type"],
+                    'is_predicted': data["is_predicted"]
+                })
+
+        return edges
 def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
     best_match_word = ''
     email = [value for key, value in new_nodes if key == 'Text']
@@ -51,9 +109,28 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
     email = preprocess_mail(email)
     graph.add_node(email, node_type='email', embedding=get_node_embedding(email))
 
+    sentences = sent_tokenize(email)
+
+    prev_sentence_node = None  # To track the previous sentence node for "comes after" edges
+    for i, sentence in enumerate(sentences):
+        # Create a unique node identifier for the sentence
+        # Add sentence node
+        graph.add_node(sentence, node_type='sentence', embedding=get_node_embedding(sentence))
+
+        # Add "child of" edge between email and sentence
+        graph.add_edge(email, sentence, edge_type='child_of')
+        graph.add_edge(sentence, email, edge_type='father_of')
+
+        # Add "comes after" edge between consecutive sentences
+        if prev_sentence_node:
+            graph.add_edge(prev_sentence_node, sentence, edge_type='comes_after')
+
+        # Update previous sentence node
+        prev_sentence_node = sentence
+
     msg_sub = KnowExtract(email, gb.trie, 2)
-    for hop in range(4):
-        ex_nodes = msg_sub.new_hop(hop_nr=hop, k=10)
+    for hop in range(2):
+        ex_nodes = msg_sub.new_hop(hop_nr=hop, k=100)
         if ex_nodes == 0:
             break
 
@@ -71,7 +148,9 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
         node_check = trie_hash.query(hash_value)
         if node_check:  # if entity already in graph
             graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
-            graph.add_edge(email, norm_entity, edge_type='belongs_to', is_predicted=False)
+            sentences = get_corresponding_sentence(email,entity)
+            for sentence in sentences:
+               graph.add_edge(sentence, norm_entity, edge_type='mentions', is_predicted=False)
             if msg_sub.graph_edges is not None:
                 add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
         else:  # if entity not in graph
@@ -79,7 +158,9 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
             if spell_check != ([], []):  # node not misspelled, conceptNet returns something
                 set_trie_hash(trie_hash, hash_value, norm_entity)  # add to hash
                 graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
-                graph.add_edge(email, norm_entity, edge_type='belongs_to', is_predicted=False)  # add to graph
+                sentences = get_corresponding_sentence(email, entity)
+                for sentence in sentences:
+                    graph.add_edge(sentence, norm_entity, edge_type='mentions', is_predicted=False)
                 if msg_sub.graph_edges is not None:
                     add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
             else:  # nodes probably misspelled, conceptNet returns nothing
@@ -104,31 +185,46 @@ def edge_creation(graph, dictionary, gb, new_nodes, trie_hash):
                     #best_match = get_max_similarity_word(similarity_array)
                     #if best_match == '' or best_match is None:
                     #    continue
-                    for word in similar_words:
+                    for word in similar_words[:5]:
                         best_match_word = split_conceptnet_word(word)
                         norm_entity = normalize_nodes(best_match_word)
                         set_trie_hash(trie_hash, hash_value, norm_entity)
-                        graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
-                        graph.add_edge(email, norm_entity, edge_type='belongs_to', is_predicted=True)
+                        sentences = get_corresponding_sentence(email, entity)
+                        for sentence in sentences:
+                            graph.add_edge(sentence, norm_entity, edge_type='mentions', is_predicted=True)
                         if msg_sub.graph_edges is not None:
                             add_context_nodes(graph, norm_entity, msg_sub.graph_edges)
+
+                #version 3, to train HGT with, without any misspelling mechanism
+                """set_trie_hash(trie_hash, hash_value, norm_entity)  # add to hash
+                graph.add_node(norm_entity, node_type='noun', embedding=get_node_embedding(norm_entity))
+                sentences = get_corresponding_sentence(email, entity)
+                for sentence in sentences:
+                    graph.add_edge(sentence, norm_entity, edge_type='mentions', is_predicted=True)
+                if msg_sub.graph_edges is not None:
+                    add_context_nodes(graph, norm_entity, msg_sub.graph_edges)"""
+
 
 
     for entity in msg_sub.data['edges_before']:
         for i in range(len(entity[0])):
-            if not graph.has_node(entity[0][i]):
-               graph.add_node(entity[0][i], node_type='sentence', embedding=get_node_embedding(entity[0][i]))
-            if not graph.has_node(entity[1]):
-               graph.add_node(entity[1], node_type='sentence', embedding=get_node_embedding(entity[1]))
-            graph.add_edge(entity[0][i], entity[1], edge_type=str(entity[2]))
+            if entity[0][i] != 'Empty_node':
+                if not graph.has_node(entity[0][i]):
+                   graph.add_node(entity[0][i], node_type='substring', embedding=get_node_embedding(entity[0][i]))
+                if not graph.has_node(entity[1]):
+                   graph.add_node(entity[1], node_type='noun', embedding=get_node_embedding(entity[1]))
+                graph.add_edge(entity[0][i], entity[1], edge_type=str(entity[2][0]))
+                graph.add_edge(entity[1], entity[0][i], edge_type='comes_after')
 
     for entity in msg_sub.data['edges_after']:
         for i in range(len(entity[0])):
-            if not graph.has_node(entity[0][i]):
-                graph.add_node(entity[0][i], node_type='sentence', embedding=get_node_embedding(entity[0][i]))
-            if not graph.has_node(entity[1]):
-                graph.add_node(entity[1], node_type='sentence', embedding=get_node_embedding(entity[1]))
-            graph.add_edge(entity[0][i], entity[1], edge_type=str(entity[2]))
+            if entity[0][i] != 'Empty_node':
+                if not graph.has_node(entity[0][i]):
+                    graph.add_node(entity[0][i], node_type='substring', embedding=get_node_embedding(entity[0][i]))
+                if not graph.has_node(entity[1]):
+                    graph.add_node(entity[1], node_type='noun', embedding=get_node_embedding(entity[1]))
+                graph.add_edge(entity[0][i], entity[1], edge_type=str(entity[2][0]))
+                graph.add_edge(entity[1], entity[0][i], edge_type='comes_before')
 
     """for entity in msg_sub.graph_edges:
         split_word = entity[0].split('/')
@@ -184,7 +280,7 @@ def add_context_nodes(graph, norm_entity, graph_edges):
     for edges in graph_edges:
         word = split_conceptnet_word(edges)
         norm_word = normalize_nodes(word)
-        if norm_word == norm_entity:
+        if norm_word.lower() == norm_entity.lower():
             graph.add_node(edges[1], node_type='context', embedding=get_node_embedding(edges[1]))
 #            graph.add_edge(norm_entity, edges[1], edge_type=edges[2])
             graph.add_edge(norm_entity, edges[1], edge_type='has_context')
@@ -194,15 +290,26 @@ def split_conceptnet_word(conceptnet_word):
     actual_word = split_word[3]
     return actual_word
 
+def get_corresponding_sentence(email, entity):
+    # Tokenize the email into sentences
+    sentences = sent_tokenize(email)
+
+    # Compile a regex pattern to match the entity as a whole word
+    entity_pattern = re.compile(rf'\b{re.escape(entity)}\b', re.IGNORECASE)
+
+    # Collect all sentences containing the entity
+    matching_sentences = [
+        sentence.strip() for sentence in sentences if re.search(entity_pattern, sentence)
+    ]
+    return matching_sentences
+
+
 
 def pick_best_match(misspelled_word, similar_words, email,gb):
     sentence_pattern = r'([^.?!]*[.?!])'
     sentences = re.findall(sentence_pattern, email)
     word_similarity_data = []
     sentence_hit = ''
-    # Iterate through sentences and check if the entity is present
-#    word = word[0].split('/')[3]
-
     entity_pattern = re.compile(rf'\b{re.escape(misspelled_word)}\b')
 
     for sentence in sentences:
@@ -343,19 +450,60 @@ def hashing_function(value):  # hashing to asign a unique Id to each node
 
 def normalize_nodes(entity):
     filtered_entities = []
-    doc = nlp(entity)
+    normalized_entity = ''
+    doc = nlp_de(entity)
     for token in doc:
-        lemma = token.lemma_
-        normalised_entity = lemma
-
-    return normalised_entity
+        if token.ent_type_ != 'PER' and token.ent_type_ != 'ORG' and token.ent_type_ != 'GPE':
+            lemma = token.lemma_
+            normalized_entity = lemma
+        else:
+            normalized_entity = entity
+    return normalized_entity
 
 
 def visualise_graph(graph):
     plt.figure(figsize=(30, 35))  # Adjust the figure size for better visualization
     nx.draw_networkx(graph, with_labels=True)
-    plt.show()
+    #plt.show()
+    plt.savefig('saved_data/graph.png')
 
+def visualise_graph_w_l(graph):
+    plt.figure(figsize=(30, 35))  # Adjust the figure size for better visualization
+
+    # Generate node positions using a layout algorithm (e.g., spring layout)
+    pos = nx.spring_layout(graph, seed=42)  # You can choose a different layout if desired
+
+    # Draw nodes with labels
+    nx.draw_networkx_nodes(graph, pos, node_size=500, node_color='skyblue')
+    nx.draw_networkx_labels(graph, pos, font_size=12)
+
+    # Draw edges
+    nx.draw_networkx_edges(graph, pos, width=1.0, alpha=0.5, edge_color='gray')
+
+    # Extract edge labels (edge_type) and display them
+    edge_labels = nx.get_edge_attributes(graph, 'edge_type')
+    nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, font_size=10)
+
+    # Save the plot to a file
+    plt.savefig('saved_data/graph.png')
+    plt.close()
+
+def visualise_subgraph(graph):
+    # Find the specific node (e.g., node 1)
+    specific_node = "Susann"
+
+    # Get all nodes connected to this specific node
+    connected_nodes = list(graph.neighbors(specific_node))
+    subgraph_nodes = [specific_node] + connected_nodes
+    subgraph = graph.subgraph(subgraph_nodes)
+
+    # Create a new figure
+    plt.figure(figsize=(6, 6))  # Explicitly creating a new figure
+
+    nx.draw_networkx(subgraph, with_labels=True)
+
+    plt.title(f"Node {specific_node} and its connected nodes")
+    plt.savefig('saved_data/subgraph.png')  # Save plot to a file instead of displaying
 
 
 
@@ -379,10 +527,10 @@ def save_graph(graph):
     nx.write_graphml(graph, "/Users/rishabhsingh/PycharmProjects/Mails_Graph/datasets/graph.graphml")
 
 def save_graph_pickle(graph):
-    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_500.pkl', 'wb') as f:
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_tf_small.pkl', 'wb') as f:
         pickle.dump(graph, f)
 
 def load_graph_pickle():
-    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_500.pkl', 'rb') as f:
+    with open('/Users/rishabhsingh/Rishabh_thesis_code/Mails_Graph/saved_data/graph_tf_small.pkl', 'rb') as f:
         graph = pickle.load(f)
     return graph

@@ -4,7 +4,7 @@ import re
 import gensim.downloader
 import torch_geometric.transforms as T
 from nltk import RegexpTokenizer
-from geometric_data_object import GeometricDataObject
+from geo_data_obj_directed import GeometricDataObject
 import copy
 import torch
 from sentence_transformers import SentenceTransformer
@@ -12,9 +12,10 @@ import gc
 import fasttext
 import fasttext.util
 from torch_geometric.nn import HGTConv, Linear
+from torch_geometric.data import HeteroData
 
 # Download and load the fasttext model
-fasttext.util.download_model('de', if_exists='ignore')  # German model
+#fasttext.util.download_model('de', if_exists='ignore')  # German model
 ft = fasttext.load_model('cc.de.300.bin')
 
 # gb = GraphBuilder()
@@ -135,25 +136,25 @@ for email in email_nodes:
         return word"""
 
 
-def create_corrupted_graphs(graph, email_nodes):
+def create_corrupted_graphs(graph, sentence_nodes):
     # Create deep copies of the original graph
     typo_graph = copy.deepcopy(graph)
     similar_word_graph = copy.deepcopy(graph)
 
-    for email in tqdm(email_nodes, total=len(email_nodes), desc='Processing emails'):
-        email_edges = graph.edges(email, data=True)
-        for edge in email_edges:
+    for sentence in tqdm(sentence_nodes, total=len(sentence_nodes), desc='Processing emails'):
+        sentence_edges = graph.edges(sentence, data=True)
+        for edge in sentence_edges:
             source, target, attr = edge
-            if graph.nodes[source]['node_type'] == 'email' and graph.nodes[target]['node_type'] == 'noun' and attr[
-                'edge_type'] == 'belongs_to':
+            if graph.nodes[source]['node_type'] == 'sentence' and graph.nodes[target]['node_type'] == 'noun' and attr[
+                'edge_type'] == 'mentions':
                 noun_word = target  # Assuming 'target' is the noun
 
                 # Replace with misspelled version
                 misspelled_embedding, misspelled_word = get_corrupted_embedding(noun_word, 'misspelled')
-                new_email_node = replace_word(noun_word, misspelled_word, email)
-                typo_graph.add_node(new_email_node, node_type='email', embedding=get_node_embedding(new_email_node))
+                new_sentence_node = replace_word(noun_word, misspelled_word, sentence)
+                typo_graph.add_node(new_sentence_node, node_type='sentence', embedding=get_node_embedding(new_sentence_node))
                 typo_graph.add_node(misspelled_word, node_type='noun', embedding=misspelled_embedding)
-                typo_graph.add_edge(new_email_node, misspelled_word, edge_type='belongs_to')
+                typo_graph.add_edge(new_sentence_node, misspelled_word, edge_type='mentions')
                 #                typo_graph.add_node(misspelled_word, node_type='noun', embedding=misspelled_embedding)
                 #typo_graph.nodes[noun_word]['embedding'] = misspelled_embedding
                 #typo_graph.nodes[noun_word]['corrupted_as'] = misspelled_word
@@ -164,10 +165,10 @@ def create_corrupted_graphs(graph, email_nodes):
                 similar_embedding, similar_word = get_corrupted_embedding(noun_word, 'semantic')
                 if similar_word != '':
                     #                   similar_word_graph.add_node(similar_word, node_type='noun', embedding=similar_embedding)
-                    new_email_node = replace_word(noun_word, misspelled_word,email)
-                    similar_word_graph.add_node(new_email_node, node_type='email', embedding=get_node_embedding(new_email_node))
+                    new_sentence_node = replace_word(noun_word, misspelled_word,sentence)
+                    similar_word_graph.add_node(new_sentence_node, node_type='sentence', embedding=get_node_embedding(new_sentence_node))
                     similar_word_graph.add_node(similar_word, node_type='noun', embedding=similar_embedding)
-                    similar_word_graph.add_edge(new_email_node, similar_word, edge_type='belongs_to')
+                    similar_word_graph.add_edge(new_sentence_node, similar_word, edge_type='mentions')
                     #similar_word_graph.nodes[noun_word]['embedding'] = similar_embedding
                     #similar_word_graph.nodes[noun_word]['corrupted_as'] = similar_word
     #                   similar_word_graph.add_edge(source, similar_word, edge_type='belongs_to')
@@ -189,31 +190,34 @@ def preprocess_graphs(typo_graph, similar_word_graph, graph):
         disjoint_train_ratio=0,
         neg_sampling_ratio=0,
         add_negative_train_samples=False,
-        edge_types=("email", "belongs_to", "noun"),
-        rev_edge_types=("noun", "belongs_to", "email"),
+        edge_types=("sentence", "mentions", "noun"),
+        #rev_edge_types=("noun", "belongs_to", "email"),
     )
     train_data_typo, val_data_typo, test_data_typo = transform(data_typograph)
     train_data_sim, val_data_typo_sim, test_data_typo_sim = transform(data_similar_word_graph)
     train_data, val_data, test_data = transform(data_original)
 
-    data_original.edge_label_index = train_data["email", "belongs_to", "noun"].edge_label_index
-    data_original["email", "belongs_to", "noun"].edge_label = train_data[
-        "email", "belongs_to", "noun"].edge_label  # positive Example
+    data_original.edge_label_index = train_data["sentence", "mentions", "noun"].edge_label_index
+    data_original["sentence", "mentions", "noun"].edge_label = train_data[
+        "sentence", "mentions", "noun"].edge_label  # positive Example
 
-    data_typograph.edge_label_index = train_data_typo["email", "belongs_to", "noun"].edge_label_index
-
-    # groundtruth label 0, negative example
-    data_typograph["email", "belongs_to", "noun"].edge_label = torch.zeros_like(
-        train_data_typo["email", "belongs_to", "noun"].edge_label)
-
-    data_similar_word_graph.edge_label_index = train_data_sim["email", "belongs_to", "noun"].edge_label_index
+    data_typograph.edge_label_index = train_data_typo["sentence", "mentions", "noun"].edge_label_index
 
     # groundtruth label 0, negative example
-    data_similar_word_graph["email", "belongs_to", "noun"].edge_label = torch.zeros_like(
-        train_data_sim["email", "belongs_to", "noun"].edge_label)
+    data_typograph["sentence", "mentions", "noun"].edge_label = torch.zeros_like(
+        train_data_typo["sentence", "mentions", "noun"].edge_label)
 
+    data_similar_word_graph.edge_label_index = train_data_sim["sentence", "mentions", "noun"].edge_label_index
+
+    # groundtruth label 0, negative example
+    data_similar_word_graph["sentence", "mentions", "noun"].edge_label = torch.zeros_like(
+        train_data_sim["sentence", "mentions", "noun"].edge_label)
+
+    HeteroData.validate(data_original)
+    HeteroData.validate(data_typograph)
+    HeteroData.validate(data_similar_word_graph)
     # Instantiate the model
-    model = Model(hidden_channels=64, out_channels=12, num_heads=2, num_layers=2, metadata=data_typograph.metadata())
+    model = Model(hidden_channels=64, out_channels=12, num_heads=2, num_layers=2, metadata=data_original.metadata())
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     criterion = torch.nn.BCEWithLogitsLoss()
     train_with_corruptions(model, data_typograph, data_similar_word_graph, data_original, optimizer, criterion)
@@ -227,7 +231,7 @@ def train_with_corruptions(model, data_typograph, data_similar_word_graph, data_
         # Step 1: Train on the typo graph
         optimizer.zero_grad()
         typo_pred = model(data_typograph)
-        typo_ground_truth = data_typograph["email", "belongs_to", "noun"].edge_label  # Example label extraction
+        typo_ground_truth = data_typograph["sentence", "mentions", "noun"].edge_label  # Example label extraction
         typo_loss = criterion(typo_pred, typo_ground_truth)
         typo_loss.backward()
         optimizer.step()
@@ -235,7 +239,7 @@ def train_with_corruptions(model, data_typograph, data_similar_word_graph, data_
         # Step 2: Train on the similar word graph
         optimizer.zero_grad()
         similar_pred = model(data_similar_word_graph)
-        similar_ground_truth = data_similar_word_graph["email", "belongs_to", "noun"].edge_label
+        similar_ground_truth = data_similar_word_graph["sentence", "mentions", "noun"].edge_label
         similar_loss = criterion(similar_pred, similar_ground_truth)
         similar_loss.backward()
         optimizer.step()
@@ -243,7 +247,7 @@ def train_with_corruptions(model, data_typograph, data_similar_word_graph, data_
         # Step 3: Train on the original graph
         optimizer.zero_grad()
         original_pred = model(data_original)
-        original_ground_truth = data_original["email", "belongs_to", "noun"].edge_label
+        original_ground_truth = data_original["sentence", "mentions", "noun"].edge_label
         original_loss = criterion(original_pred, original_ground_truth)
         original_loss.backward()
         optimizer.step()
@@ -276,7 +280,7 @@ class Model(torch.nn.Module):
 
         # Get predictions for "email belongs_to noun" edges using the classifier
         pred = self.classifier(
-            x_dict["email"],
+            x_dict["sentence"],
             x_dict["noun"],
             data.edge_label_index,
         )
@@ -305,6 +309,7 @@ class HGT(torch.nn.Module):
             for node_type, x in x_dict.items()
         }
 
+        #email_features = x_dict.pop('email')
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
 #        return self.lin(x_dict['context'])
